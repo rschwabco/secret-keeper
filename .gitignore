@@ -1,0 +1,11 @@
+.Build/
+.build/
+dist/
+*.xcodeproj/
+.swiftpm/
+.DS_Store
+*.env
+.env*
+
+# Exported vault archives — never commit one
+*.skeeper

@@ -1,0 +1,158 @@
+name: release
+
+# Pushing a tag publishes a stable release. Pushing to main refreshes the
+# rolling "edge" prerelease. Installed copies poll the matching channel and
+# update themselves, so this workflow is the delivery mechanism.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Test
+        run: swift test
+
+      - name: Resolve version and channel
+        id: meta
+        run: |
+          set -euo pipefail
+          BASE="$(tr -d ' \t\n\r' < VERSION)"
+          BUILD="${{ github.run_number }}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+            CHANNEL="stable"
+            if [ "$VERSION" != "$BASE" ]; then
+              echo "::error::tag $TAG does not match ./VERSION ($BASE). Bump VERSION and retag."
+              exit 1
+            fi
+          else
+            TAG="edge"
+            VERSION="${BASE}-edge.${BUILD}"
+            CHANNEL="edge"
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "build=$BUILD"
+            echo "channel=$CHANNEL"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION (build $BUILD) for the $CHANNEL channel."
+
+      - name: Package universal app bundle
+        run: |
+          set -euo pipefail
+          ./Scripts/package-app.sh release \
+            --universal \
+            --version "${{ steps.meta.outputs.version }}" \
+            --build "${{ steps.meta.outputs.build }}" \
+            --channel "${{ steps.meta.outputs.channel }}" \
+            --repo "${{ github.repository }}"
+
+      - name: Verify the bundle
+        run: |
+          set -euo pipefail
+          APP="dist/Secret Keeper.app"
+          for f in "Contents/MacOS/SecretKeeperApp" \
+                   "Contents/MacOS/secret-keeper-mcp" \
+                   "Contents/Resources/secret-keeper-update" \
+                   "Contents/Resources/build-info.json" \
+                   "Contents/Info.plist"; do
+            [ -e "$APP/$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          for bin in SecretKeeperApp secret-keeper-mcp; do
+            lipo -archs "$APP/Contents/MacOS/$bin"
+            lipo -archs "$APP/Contents/MacOS/$bin" | grep -q arm64 \
+              || { echo "::error::$bin is missing arm64"; exit 1; }
+            lipo -archs "$APP/Contents/MacOS/$bin" | grep -q x86_64 \
+              || { echo "::error::$bin is missing x86_64"; exit 1; }
+          done
+          codesign --verify --deep --strict "$APP"
+          test "$(defaults read "$PWD/$APP/Contents/Info" CFBundleShortVersionString)" \
+            = "${{ steps.meta.outputs.version }}"
+          bash -n "$APP/Contents/Resources/secret-keeper-update"
+
+      - name: Build release assets
+        id: assets
+        run: |
+          set -euo pipefail
+          ASSET="SecretKeeper-macos-universal.zip"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Secret Keeper.app" "$ASSET"
+          SHA="$(shasum -a 256 "$ASSET" | awk '{print $1}')"
+          cat > latest.json <<JSON
+          {
+            "version": "${{ steps.meta.outputs.version }}",
+            "build": "${{ steps.meta.outputs.build }}",
+            "tag": "${{ steps.meta.outputs.tag }}",
+            "channel": "${{ steps.meta.outputs.channel }}",
+            "asset": "$ASSET",
+            "sha256": "$SHA",
+            "min_macos": "14.0",
+            "notes_url": "https://github.com/${{ github.repository }}/releases/tag/${{ steps.meta.outputs.tag }}"
+          }
+          JSON
+          printf '%s  %s\n' "$SHA" "$ASSET" > SHA256SUMS
+          cat latest.json
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      # Round-trip the archive the way the updater will, so a broken asset never
+      # reaches anyone's Mac.
+      - name: Rehearse the client-side install
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rehearse && cd /tmp/rehearse
+          ditto -x -k "$GITHUB_WORKSPACE/${{ steps.assets.outputs.asset }}" .
+          APP="/tmp/rehearse/Secret Keeper.app"
+          [ -d "$APP" ] || { echo "::error::archive has no app bundle at the top level"; exit 1; }
+          codesign --verify --deep --strict "$APP" \
+            || { echo "::error::signature does not survive the zip round trip"; exit 1; }
+          [ -x "$APP/Contents/MacOS/secret-keeper-mcp" ] || { echo "::error::mcp binary lost +x"; exit 1; }
+          [ -x "$APP/Contents/Resources/secret-keeper-update" ] || { echo "::error::updater lost +x"; exit 1; }
+          echo "Round trip OK."
+
+      - name: Publish stable release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            "${{ steps.assets.outputs.asset }}" latest.json SHA256SUMS \
+            --title "Secret Keeper ${{ steps.meta.outputs.version }}" \
+            --generate-notes
+
+      - name: Publish edge prerelease
+        if: github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Recreate so the rolling tag follows main.
+          gh release delete edge --yes --cleanup-tag 2>/dev/null || true
+          gh release create edge \
+            "${{ steps.assets.outputs.asset }}" latest.json SHA256SUMS \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Edge build ${{ steps.meta.outputs.version }}" \
+            --notes "Rolling build of \`main\` (${GITHUB_SHA:0:7}). Installed copies on the edge channel pick this up automatically."
