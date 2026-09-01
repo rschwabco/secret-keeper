@@ -2,7 +2,7 @@
 #
 # Secret Keeper uninstaller.
 #
-#   curl -fsSL https://raw.githubusercontent.com/roie/secret-keeper/main/Scripts/uninstall.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/rschwabco/secret-keeper/main/Scripts/uninstall.sh | bash
 #
 # Removes the app, the update agent, and MCP client entries. Your vault is kept
 # unless you pass --purge.

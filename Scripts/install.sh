@@ -2,7 +2,7 @@
 #
 # Secret Keeper installer.
 #
-#   curl -fsSL https://raw.githubusercontent.com/roie/secret-keeper/main/Scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/rschwabco/secret-keeper/main/Scripts/install.sh | bash
 #
 # Installs "Secret Keeper.app", wires up MCP clients, and registers a launchd
 # agent that keeps the app up to date with the repo. Prefers a prebuilt release
@@ -13,7 +13,7 @@ set -uo pipefail
 APP_NAME="Secret Keeper.app"
 LABEL="com.secretkeeper.updater"
 LOGIN_LABEL="com.secretkeeper.app"
-DEFAULT_REPO="roie/secret-keeper"
+DEFAULT_REPO="rschwabco/secret-keeper"
 DEFAULT_BRANCH="main"
 DEFAULT_BASE_URL="https://github.com"
 ASSET_NAME="SecretKeeper-macos-universal.zip"

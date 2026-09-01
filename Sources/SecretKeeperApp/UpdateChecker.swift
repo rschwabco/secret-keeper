@@ -32,7 +32,7 @@ enum UpdateChecker {
                 Automatic updates are not set up for this copy.
 
                 Re-run the installer to enable them:
-                curl -fsSL https://raw.githubusercontent.com/roie/secret-keeper/main/Scripts/install.sh | bash
+                curl -fsSL https://raw.githubusercontent.com/rschwabco/secret-keeper/main/Scripts/install.sh | bash
                 """
         }
 

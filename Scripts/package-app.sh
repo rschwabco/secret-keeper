@@ -13,7 +13,7 @@ UNIVERSAL=0
 VERSION=""
 BUILD=""
 CHANNEL="stable"
-REPO="${SECRET_KEEPER_REPO:-roie/secret-keeper}"
+REPO="${SECRET_KEEPER_REPO:-rschwabco/secret-keeper}"
 
 usage() {
   cat <<'USAGE'
@@ -24,7 +24,7 @@ Options:
   --version <x.y.z>    Marketing version. Default: contents of ./VERSION.
   --build <n>          Build number (CFBundleVersion). Default: git commit count.
   --channel <name>     Update channel baked into the bundle (stable|edge).
-  --repo <owner/name>  GitHub repo the updater checks. Default: roie/secret-keeper.
+  --repo <owner/name>  GitHub repo the updater checks. Default: rschwabco/secret-keeper.
   -h, --help           Show this help.
 USAGE
 }

@@ -52,7 +52,7 @@ Export and import are **UI-only and biometric-gated**. They are deliberately abs
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/roie/secret-keeper/main/Scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/rschwabco/secret-keeper/main/Scripts/install.sh | bash
 ```
 
 The installer:
@@ -109,7 +109,7 @@ rm ~/Library/LaunchAgents/com.secretkeeper.updater.plist
 ## Uninstall
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/roie/secret-keeper/main/Scripts/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/rschwabco/secret-keeper/main/Scripts/uninstall.sh | bash
 ```
 
 Removes the app, the update agent, and MCP client entries. **Your vault is kept** so a reinstall picks it up again. Add `--purge` to also delete the encrypted vault and its Keychain key — that is irreversible and prompts before it acts.
