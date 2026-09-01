@@ -15,7 +15,7 @@ enum AgentPrompt: Sendable {
         Setup (once per machine):
         1. Ensure Secret Keeper is installed at /Applications/Secret Keeper.app and is running.
         2. Unlock the vault (Touch ID / Face ID / Apple Watch) and keep it unlocked while you need grants.
-        3. Register a local stdio MCP server in whatever MCP client you are using (Claude Code, Windsurf, VS Code Copilot Chat, Cursor, etc.). The config file location depends on the client — look up that client’s MCP server settings.
+        3. Register a local stdio MCP server in whatever MCP client you are using (Cursor, Claude Code, Claude Desktop, Codex, Windsurf, VS Code Copilot Chat, etc.). The config file location depends on the client — look up that client’s MCP server settings.
         4. Prefer `command` + `args` over putting the space-containing binary path in a single command string. If the MCP client splits `command` on spaces (Cursor does), register via a shell wrapper so the path stays intact:
 
            command: \(mcpShellCommand)
@@ -32,6 +32,12 @@ enum AgentPrompt: Sendable {
                }
              }
            }
+
+           Codex uses TOML instead, in ~/.codex/config.toml:
+
+           [mcp_servers.secret-keeper]
+           command = "\(mcpShellCommand)"
+           args = \(mcpShellArgs)
 
            Do not use a space-free symlink into the .app (that can break bundle path resolution). `exec` replaces the shell with the MCP binary so stdio stays clean.
 

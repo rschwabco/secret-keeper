@@ -1,6 +1,6 @@
 # Secret Keeper
 
-Native macOS vault for project secrets, unlocked with Touch ID / Face ID / Apple Watch. Cursor agents request a `.env.local` symlink for a worktree via a local MCP server — secret **values are never returned** over MCP.
+Native macOS vault for project secrets, unlocked with Touch ID / Face ID / Apple Watch. Coding agents — Cursor, Claude Code, Claude Desktop, Codex — request a `.env.local` symlink for a worktree via a local MCP server, and secret **values are never returned** over MCP.
 
 ## How it works
 
@@ -10,12 +10,12 @@ Native macOS vault for project secrets, unlocked with Touch ID / Face ID / Apple
 4. **Lock** wipes materialized env files and removes those symlinks.
 
 ```
-Cursor Agent  --stdio MCP-->  secret-keeper-mcp  --unix socket-->  Secret Keeper.app
-                                                                   |
-                                                                   +--> Keychain (biometric)
-                                                                   +--> vault.dat (AES-GCM)
-                                                                   +--> grants/*.env (session)
-                                                                   +--> worktree/.env.local  (symlink)
+Cursor / Claude Code / Codex  --stdio MCP-->  secret-keeper-mcp  --unix socket-->  Secret Keeper.app
+                                                                                   |
+                                                                                   +--> Keychain (biometric)
+                                                                                   +--> vault.dat (AES-GCM)
+                                                                                   +--> grants/*.env (session)
+                                                                                   +--> worktree/.env.local  (symlink)
 ```
 
 ## Moving a vault to another Mac
@@ -60,7 +60,7 @@ The installer:
 1. Fetches the latest release manifest, downloads the universal build, and **verifies its SHA-256** before unpacking. A mismatch aborts the install.
 2. Installs `Secret Keeper.app` into `/Applications`, or `~/Applications` when `/Applications` is not writable — updates need a writable install directory.
 3. Falls back to building from source when no release asset is available and Swift is installed.
-4. Adds a `secret-keeper` entry to every MCP client it finds — Cursor, Claude Desktop, Claude Code — backing up each config first.
+4. Adds a `secret-keeper` entry to every MCP client it finds — Cursor, Claude Code, Claude Desktop, and Codex — backing up each config first.
 5. Registers a launchd agent that keeps the app current.
 
 | Flag | Effect |
@@ -140,11 +140,20 @@ CI fails the release if the tag does not match `VERSION`. Every release runs `sw
 
 ## MCP config
 
-The installer does this for Cursor, Claude Desktop, and Claude Code automatically. Configure it by hand only if you used `--no-mcp-config`, or for a client the installer does not know about (Cursor: `~/.cursor/mcp.json`; other clients use their own settings path).
+The installer wires this up for every client it finds, backing up each config first. Do it by hand only if you passed `--no-mcp-config`, or for a client not listed here.
+
+| Client | Config file | Format |
+| --- | --- | --- |
+| Cursor | `~/.cursor/mcp.json` | JSON — `mcpServers` |
+| Claude Code | `~/.claude.json`, written via `claude mcp add-json … --scope user` | JSON — `mcpServers` |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | JSON — `mcpServers` |
+| Codex | `~/.codex/config.toml` | TOML — `[mcp_servers.*]` |
 
 Prefer `command` + `args` over putting the space-containing binary path in a single command string. Some clients (including Cursor) split `command` on whitespace, which turns `/Applications/Secret Keeper.app/...` into executable `/Applications/Secret` and fails with `ENOENT`.
 
 Use a shell wrapper with `exec` so the path stays intact and the shell replaces itself with the binary (stdio stays clean). Do **not** use a space-free symlink into the `.app` (that can break bundle path resolution).
+
+JSON clients — Cursor, Claude Code, Claude Desktop:
 
 ```json
 {
@@ -158,7 +167,15 @@ Use a shell wrapper with `exec` so the path stays intact and the shell replaces 
 }
 ```
 
-Keep Secret Keeper running and **unlocked** while agents need grants.
+Codex, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.secret-keeper]
+command = "/bin/sh"
+args = ["-c", "exec '/Applications/Secret Keeper.app/Contents/MacOS/secret-keeper-mcp'"]
+```
+
+Restart the client after editing, and keep Secret Keeper running and **unlocked** while agents need grants.
 
 ## MCP tools
 

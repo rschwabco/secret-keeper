@@ -122,6 +122,26 @@ if command -v claude >/dev/null 2>&1; then
   claude mcp remove secret-keeper --scope user >/dev/null 2>&1 && ok "cleaned Claude Code"
 fi
 
+# Codex stores MCP servers as TOML tables.
+CODEX="$HOME/.codex/config.toml"
+if [ -f "$CODEX" ] && grep -q '^\[mcp_servers\.secret-keeper\]' "$CODEX" 2>/dev/null; then
+  cp -f "$CODEX" "$CODEX.secret-keeper.bak" 2>/dev/null
+  tmp="$(mktemp -t sk-codex)" || tmp=""
+  if [ -n "$tmp" ] && awk '
+      /^\[mcp_servers\.secret-keeper\]/  { skip = 1; next }
+      /^\[mcp_servers\.secret-keeper\./  { skip = 1; next }
+      /^\[/                              { skip = 0 }
+      !skip                               { print }
+    ' "$CODEX" > "$tmp" \
+    && [ "$(grep -c '^\[' "$tmp")" -ge "$(( $(grep -c '^\[' "$CODEX") - 1 ))" ] \
+    && mv -f "$tmp" "$CODEX"; then
+    ok "cleaned $CODEX"
+  else
+    rm -f "$tmp" 2>/dev/null
+    warn "could not edit $CODEX — remove the [mcp_servers.secret-keeper] table by hand"
+  fi
+fi
+
 # ------------------------------------------------------------------ vault data
 if [ "$PURGE" -eq 1 ]; then
   if [ "$ASSUME_YES" -eq 0 ]; then

@@ -457,6 +457,50 @@ configure_mcp_file() {  # configure_mcp_file <label> <path>
   return 1
 }
 
+# Codex keeps MCP servers in TOML, not JSON: [mcp_servers.<name>] tables.
+configure_codex() {
+  local file="$HOME/.codex/config.toml" tmp before after ours
+  [ -d "$HOME/.codex" ] || return 1
+
+  if [ -f "$file" ] && grep -qF "exec '$MCP_BIN'" "$file" 2>/dev/null; then
+    note "Codex already points at this install"
+    return 0
+  fi
+
+  [ -f "$file" ] || : > "$file"
+  [ -f "$file.secret-keeper.bak" ] || cp -f "$file" "$file.secret-keeper.bak" 2>/dev/null
+
+  tmp="$(mktemp -t sk-codex)" || return 1
+  # Drop any existing secret-keeper table (and its sub-tables), then append fresh.
+  awk '
+    /^\[mcp_servers\.secret-keeper\]/  { skip = 1; next }
+    /^\[mcp_servers\.secret-keeper\./  { skip = 1; next }
+    /^\[/                              { skip = 0 }
+    !skip                               { print }
+  ' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+
+  {
+    printf '\n[mcp_servers.secret-keeper]\n'
+    printf 'command = "/bin/sh"\n'
+    printf 'args = ["-c", "exec '"'"'%s'"'"'"]\n' "$MCP_BIN"
+  } >> "$tmp"
+
+  # Never trade someone's config for ours: bail unless every other table survived.
+  before="$(grep -c '^\[' "$file" 2>/dev/null || printf 0)"
+  after="$(grep -c '^\[' "$tmp" 2>/dev/null || printf 0)"
+  ours="$(grep -c '^\[mcp_servers\.secret-keeper\]$' "$tmp" 2>/dev/null || printf 0)"
+  if [ "$ours" -ne 1 ] || [ "$after" -lt "$before" ]; then
+    rm -f "$tmp"
+    warn "Codex: could not edit $file safely — left it alone"
+    return 1
+  fi
+
+  mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+  ok "Codex configured"
+  [ -f "$file.secret-keeper.bak" ] && note "backup: $file.secret-keeper.bak"
+  return 0
+}
+
 if [ "$CONFIGURE_MCP" -eq 1 ]; then
   info "Wiring up MCP clients"
   configured=0
@@ -469,6 +513,7 @@ if [ "$CONFIGURE_MCP" -eq 1 ]; then
       configured=1
     fi
   fi
+  configure_codex && configured=1
   [ "$configured" -eq 0 ] && note "no MCP clients detected — see the snippet below"
 fi
 
