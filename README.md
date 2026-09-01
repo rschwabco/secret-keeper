@@ -132,9 +132,11 @@ swift run SecretKeeperApp
 ```bash
 echo "1.2.3" > VERSION
 git commit -am "Release 1.2.3"
-git tag v1.2.3
-git push origin main --tags
+git tag -a v1.2.3 -m "Secret Keeper 1.2.3"
+git push --follow-tags
 ```
+
+Use `-a`. `git push --follow-tags` pushes **annotated** tags only, so a lightweight `git tag v1.2.3` looks tagged locally and silently never reaches the remote — no release is built, and nothing updates. `git push origin main --tags` pushes either kind.
 
 CI fails the release if the tag does not match `VERSION`. Every release runs `swift test`, verifies the bundle is universal and correctly signed, and rehearses the client-side unpack before publishing — a broken asset never reaches anyone's Mac.
 
