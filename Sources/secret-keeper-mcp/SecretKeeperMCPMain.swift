@@ -4,10 +4,16 @@ import SecretKeeperCore
 
 @main
 struct SecretKeeperMCP {
+    /// Mirrors the installed bundle so the MCP handshake reports what the
+    /// updater actually put on disk, not a string frozen at author time.
+    static let version: String =
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? "0.0.0-dev"
+
     static func main() async {
         let server = Server(
             name: "secret-keeper",
-            version: "1.0.0",
+            version: Self.version,
             capabilities: .init(
                 tools: .init(listChanged: false)
             )
