@@ -72,7 +72,26 @@ fi
 echo "Building ${VERSION} (${BUILD}) — ${CONFIGURATION}$( (( UNIVERSAL )) && echo ', universal' )…"
 swift build -c "$CONFIGURATION" "${ARCH_FLAGS[@]}"
 
-BIN_DIR="$(swift build -c "$CONFIGURATION" "${ARCH_FLAGS[@]}" --show-bin-path)"
+# Locating build products: `--show-bin-path` is not reliable across toolchains
+# once --arch flags select the Xcode build system, so fall back to the known
+# product directories rather than trusting it.
+BIN_DIR=""
+if try_dir="$(swift build -c "$CONFIGURATION" "${ARCH_FLAGS[@]}" --show-bin-path 2>/dev/null)"; then
+  [[ -n "$try_dir" && -x "$try_dir/SecretKeeperApp" ]] && BIN_DIR="$try_dir"
+fi
+if [[ -z "$BIN_DIR" ]]; then
+  conf_dir="${(C)CONFIGURATION}"   # release -> Release
+  for cand in \
+    "$ROOT/.build/apple/Products/$conf_dir" \
+    "$ROOT/.build/$(uname -m)-apple-macosx/$CONFIGURATION"; do
+    if [[ -x "$cand/SecretKeeperApp" ]]; then BIN_DIR="$cand"; break; fi
+  done
+fi
+if [[ -z "$BIN_DIR" ]]; then
+  echo "package-app.sh: could not locate build products under $ROOT/.build" >&2
+  exit 1
+fi
+echo "Products: $BIN_DIR"
 
 echo "Assembling ${APP_NAME}…"
 rm -rf "$APP_DIR"
