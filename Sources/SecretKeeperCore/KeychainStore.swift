@@ -91,27 +91,60 @@ public struct KeychainStore: Sendable {
         return try reader(nil)
     }
 
-    /// Present exactly one system unlock prompt (Touch ID and/or Apple Watch).
+    /// Present one system unlock prompt, escalating only when the current policy
+    /// cannot succeed at all.
+    ///
+    /// Normal case on a Touch ID Mac: a single biometric/companion sheet, exactly
+    /// as before. But a Mac with no Touch ID and no paired Watch can never satisfy
+    /// those policies, and a sheet the system keeps cancelling never will either —
+    /// so rather than leave someone permanently locked out of their own vault, fall
+    /// through to `.deviceOwnerAuthentication`, which accepts the login password.
+    ///
+    /// Escalation is deliberately narrow. A person who dismissed the sheet
+    /// (`userCancel`) or whose biometry simply did not match gets no second prompt;
+    /// re-prompting them would be nagging, not recovery.
     @MainActor
     public static func authenticateOwner(reason: String) async throws -> LAContext {
-        // First attempt. On systemCancel (-4) from a focus/menu race, settle and retry once.
-        do {
-            return try await evaluateUnlockPolicy(reason: reason)
-        } catch SecretKeeperError.authenticationInterrupted {
-            Self.log("systemCancel — retrying once after activation settle")
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            return try await evaluateUnlockPolicy(reason: reason)
+        let chain = unlockPolicyChain()
+        Self.log("unlock policy chain: \(chain.map(\.rawValue))")
+
+        var lastError: Error = SecretKeeperError.biometricRequired
+
+        for (index, policy) in chain.enumerated() {
+            let isLast = index == chain.count - 1
+            do {
+                return try await evaluateUnlockPolicy(policy: policy, reason: reason)
+            } catch SecretKeeperError.authenticationInterrupted {
+                // Focus / menu-teardown race. Settle, then retry the same policy once.
+                Self.log("policy \(policy.rawValue) interrupted — retrying once after settle")
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                do {
+                    return try await evaluateUnlockPolicy(policy: policy, reason: reason)
+                } catch SecretKeeperError.authenticationCanceled {
+                    throw SecretKeeperError.authenticationCanceled
+                } catch {
+                    lastError = error
+                    if isLast { throw error }
+                    Self.log("policy \(policy.rawValue) still interrupted — escalating")
+                }
+            } catch SecretKeeperError.biometricRequired {
+                // No biometry on this Mac, none enrolled, or locked out after retries.
+                lastError = SecretKeeperError.biometricRequired
+                if isLast { throw lastError }
+                Self.log("policy \(policy.rawValue) unavailable — escalating")
+            }
         }
+
+        throw lastError
     }
 
     @MainActor
-    private static func evaluateUnlockPolicy(reason: String) async throws -> LAContext {
+    private static func evaluateUnlockPolicy(policy: LAPolicy, reason: String) async throws -> LAContext {
         let context = LAContext()
         context.localizedReason = reason
         context.localizedCancelTitle = "Cancel"
         context.interactionNotAllowed = false
 
-        let policy = preferredUnlockPolicy(context: context)
         Self.log("evaluatePolicy rawValue=\(policy.rawValue)")
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -159,42 +192,47 @@ public struct KeychainStore: Sendable {
         return .authenticationFailed(detail)
     }
 
-    /// Touch ID / Face ID **with** Apple Watch. Never `.deviceOwnerAuthentication`
-    /// (that policy adds a password fallback sheet).
-    static func preferredUnlockPolicy(context: LAContext) -> LAPolicy {
+    /// Policies to attempt, most specific first.
+    ///
+    /// Biometric and companion (Apple Watch) policies come first so the usual
+    /// unlock stays a single Touch ID sheet. `.deviceOwnerAuthentication` is
+    /// always appended last: it is the only policy that accepts the login
+    /// password, and without it a Mac with no Touch ID and no paired Watch has no
+    /// way to open its own vault.
+    ///
+    /// This does not widen who can read the vault. The Keychain item carries no
+    /// biometric `SecAccessControl` — that is what lets it survive re-signing and
+    /// reinstalls — so the key is already readable by anything running as this
+    /// user. The prompt is the app's own gate, not the Keychain's.
+    static func unlockPolicyChain(context: LAContext = LAContext()) -> [LAPolicy] {
+        var chain: [LAPolicy] = []
         var error: NSError?
 
-        if #available(macOS 15.0, *) {
-            if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometricsOrCompanion, error: &error) {
-                return .deviceOwnerAuthenticationWithBiometricsOrCompanion
-            }
+        func appendIfEvaluable(_ policy: LAPolicy) {
             error = nil
-            if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithCompanion, error: &error) {
-                return .deviceOwnerAuthenticationWithCompanion
-            }
-            error = nil
-        } else {
-            if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometricsOrWatch, error: &error) {
-                return .deviceOwnerAuthenticationWithBiometricsOrWatch
-            }
-            error = nil
-            if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithWatch, error: &error) {
-                return .deviceOwnerAuthenticationWithWatch
-            }
-            error = nil
+            guard context.canEvaluatePolicy(policy, error: &error) else { return }
+            guard !chain.contains(policy) else { return }
+            chain.append(policy)
         }
 
-        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
-            return .deviceOwnerAuthenticationWithBiometrics
-        }
-
-        // Last resort still avoids password-capable deviceOwnerAuthentication when
-        // companion APIs exist but canEvaluate failed transiently — try companion raw.
         if #available(macOS 15.0, *) {
-            return .deviceOwnerAuthenticationWithBiometricsOrCompanion
+            appendIfEvaluable(.deviceOwnerAuthenticationWithBiometricsOrCompanion)
+            appendIfEvaluable(.deviceOwnerAuthenticationWithCompanion)
         } else {
-            return .deviceOwnerAuthenticationWithBiometricsOrWatch
+            appendIfEvaluable(.deviceOwnerAuthenticationWithBiometricsOrWatch)
+            appendIfEvaluable(.deviceOwnerAuthenticationWithWatch)
         }
+        appendIfEvaluable(.deviceOwnerAuthenticationWithBiometrics)
+
+        if !chain.contains(.deviceOwnerAuthentication) {
+            chain.append(.deviceOwnerAuthentication)
+        }
+        return chain
+    }
+
+    /// The prompt shown first. Password-capable only when nothing else can run.
+    static func preferredUnlockPolicy(context: LAContext) -> LAPolicy {
+        unlockPolicyChain(context: context).first ?? .deviceOwnerAuthentication
     }
 
     public func deleteKey() throws {

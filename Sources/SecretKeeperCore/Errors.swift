@@ -56,7 +56,7 @@ public enum SecretKeeperError: Error, LocalizedError, Sendable, Equatable {
         case .authenticationCanceled:
             return "Unlock canceled."
         case .authenticationInterrupted:
-            return "Unlock was interrupted. Try again with the Secret Keeper window frontmost."
+            return "Unlock was interrupted before it could finish. Bring the Secret Keeper window to the front and try again — if biometrics cannot run on this Mac, the prompt falls back to your login password."
         case .authenticationFailed(let detail):
             return "Unlock failed: \(detail)"
         case .notInitialized:
