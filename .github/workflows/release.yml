@@ -18,11 +18,22 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # SwiftPM's Xcode build system (selected by the --arch flags used for the
+      # universal build) errors on dependencies that declare swiftLanguageVersions
+      # under Swift 6.1. Pin the newest Xcode on the image rather than the default.
+      - name: Select newest Xcode
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app
+          newest="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          echo "Selecting $newest"
+          sudo xcode-select -s "$newest/Contents/Developer"
 
       - name: Show toolchain
         run: |
